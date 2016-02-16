@@ -1,0 +1,378 @@
+<?php
+/**
+ * @file
+ * Technical test for Adyax co.
+ */
+
+/**
+ * Implements hook_field_info().
+ */
+/**
+ * Implements hook_field_info().
+ */
+function adyax_test_field_info() {
+  return array(
+    'vimeo_video' => array(
+      'label' => t('Video'),
+      'description' => t('This field stores link on vimeo video in the database.'),
+      'default_widget' => 'adyax_test_linkfield',
+      'default_formatter' => 'adyax_test_embedvideo',
+    ),
+  );
+}
+
+/**
+ * Implements hook_field_widget_info().
+ */
+function adyax_test_field_widget_info() {
+  return array(
+    'adyax_test_linkfield' => array(
+      'label' => t('Vimeo video link'),
+      'field types' => array('vimeo_video'),
+    ),
+  );
+}
+
+/**
+ * Implements hook_field_widget_form().
+ */
+function adyax_test_field_widget_form(&$form, &$form_state, $field, $instance, $langcode, $items, $delta, $element) {
+
+  if ($field['cardinality'] == 1) {
+    $element += array(
+      '#type' => 'fieldset',
+    );
+  }
+
+  $element['video_url'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Vimeo video URL'),
+    '#default_value' => isset($items[$delta]['video_url']) ? $items[$delta]['video_url'] : '',
+    '#required' => $element['#required'],
+    '#maxlength' => 255,
+  );
+
+  $element['description'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Description'),
+    '#default_value' => isset($items[$delta]['description']) ? $items[$delta]['description'] : '',
+    '#description' => t('The description for the video marks.'),
+    '#maxlength' => 255,
+  );
+
+  return $element;
+}
+
+/**
+ * Implements hook_field_is_empty().
+ */
+function adyax_test_field_is_empty($item, $field) {
+  return empty($item) || empty($item['video_url']) || $item['video_url'] === '';
+}
+
+/**
+ * Implements hook_field_validate().
+ */
+function adyax_test_field_validate($entity_type, $entity, $field, $instance, $langcode, $items, &$errors) {
+  foreach ($items as $delta => $item) {
+    if (!empty($item['video_url'])) {
+      $item['video_url'] = trim($item['video_url']);
+      if (stristr($item['video_url'], '.') && !stristr($item['video_url'], 'http://') && !stristr($item['video_url'], 'https://')) {
+        $item['video_url'] = 'http://' . $item['video_url'];
+      }
+
+      $parts = parse_url($item['video_url']);
+      if (!$parts || !isset($parts['host'])) {
+        $errors[$field['field_name']][$langcode][$delta][] = array(
+          'error' => t('Invalid URL'),
+          'message' => t('Video %name: Invalid video URL.', array('%name' => $instance['label'])),
+        );
+      }
+    }
+  }
+}
+
+/**
+ * Implements hook_field_presave().
+ *
+ * Download and save the thumbnail if it hasn't already been stored.
+ * Get video data.
+ */
+function adyax_test_field_presave($entity_type, $entity, $field, $instance, $langcode, &$items) {
+  foreach ($items as $delta => $item) {
+    $items[$delta]['video_url'] = trim($item['video_url']);
+
+    $info = adyax_test_handle_vimeo_thumbnail($item['video_url']);
+    if (isset($info['url']) && $info['url']) {
+      if (isset($info['url']) && $info['url']) {
+        $thumb_url = $info['url'];
+        $thumb_ext = pathinfo($thumb_url, PATHINFO_EXTENSION);
+        $local_path = "public://adyax_test_thumbnails/vimeo/{$info['id']}.$thumb_ext";
+
+        $dirname = drupal_dirname($local_path);
+        file_prepare_directory($dirname, FILE_CREATE_DIRECTORY | FILE_MODIFY_PERMISSIONS);
+
+        $response = drupal_http_request($thumb_url);
+        if (!isset($response->error)) {
+          file_save_data($response->data, $local_path, FILE_EXISTS_REPLACE);
+        }
+        else {
+          @copy($thumb_url, $local_path);
+        }
+
+        $items[$delta]['thumbnail_path'] = $local_path;
+        image_path_flush($local_path);
+      }
+    }
+    else {
+      $items[$delta]['thumbnail_path'] = '';
+    }
+  }
+}
+
+/**
+ * Gets the thumbnail url for vimeo videos.
+ *
+ * @param string $url
+ *   The video URL.
+ *
+ * @return array
+ *   The video thumbnail information.
+ */
+function adyax_test_handle_vimeo_thumbnail($url) {
+  $vimeo_data = _adyax_test_get_vimeo_data($url);
+
+  // Get ID of video from URL.
+  $id = _adyax_test_get_vimeo_id($vimeo_data);
+
+  $info = array(
+    'id' => $id,
+  );
+
+  try {
+    $info['url'] = $vimeo_data['thumbnail_url'];
+  } catch (Exception $e) {
+
+  }
+
+  return $info;
+}
+
+/**
+ * Helper function to get the Vimeo video's data attributes.
+ *
+ * @param string $url
+ *   A Vimeo video URL to get the data from.
+ *
+ * @return integer|false
+ *   The video's data attributes, or FALSE if unable to get the video ID.
+ */
+function _adyax_test_get_vimeo_data($url) {
+  // Set oembed endpoint
+  $oembed_endpoint = 'http://vimeo.com/api/oembed';
+  // Fetch vimeo data
+  $response = drupal_http_request($oembed_endpoint . '.json?url=' . rawurlencode($url));
+
+  try {
+    return json_decode($response->data, TRUE);
+  } catch (Exception $e) {
+    return FALSE;
+  }
+}
+
+/**
+ * Helper function to get the Vimeo video's data attributes.
+ *
+ * @param string $url
+ *   A Vimeo video URL to get the ID of.
+ *
+ * @return integer|false
+ *   The video ID, or FALSE if unable to get the video ID.
+ */
+function _adyax_test_get_vimeo_id($vimeo_data) {
+  try {
+    $video_id = $vimeo_data['video_id'];
+  } catch (Exception $e) {
+    $video_id = FALSE;
+  }
+
+  return $video_id;
+}
+
+/**
+ * Implements hook_field_formatter_info().
+ */
+function adyax_test_field_formatter_info() {
+  return array(
+    'adyax_test_embedvideo' => array(
+      'label' => t('Thumbnail'),
+      'field types' => array('vimeo_video'),
+      'settings' => array(
+        'image_style' => '',
+        'image_link' => 'none',
+        'description' => 1,
+        'description_position' => 'bottom',
+      ),
+    ),
+  );
+}
+
+/**
+ * Implements hook_field_formatter_settings_form().
+ */
+function adyax_test_field_formatter_settings_form($field, $instance, $view_mode, $form, &$form_state) {
+  $display = $instance['display'][$view_mode];
+  $settings = $display['settings'];
+  $element = array();
+
+  if ($display['type'] == 'adyax_test_embedvideo') {
+    $link_types = array(
+      'content' => t('Content'),
+      'source' => t('Video Source'),
+    );
+    $element['image_link'] = array(
+      '#title' => t('Link thumbnail to'),
+      '#type' => 'select',
+      '#default_value' => $settings['image_link'],
+      '#empty_option' => t('Nothing'),
+      '#options' => $link_types,
+    );
+    $element['image_style'] = array(
+      '#title' => t('Image style'),
+      '#type' => 'select',
+      '#options' => image_style_options(FALSE),
+      '#default_value' => $settings['image_style'],
+      '#empty_option' => t('None (original image)'),
+    );
+    $element['description'] = array(
+      '#title' => t('Show description'),
+      '#type' => 'checkbox',
+      '#default_value' => $settings['description'],
+    );
+    $element['description_position'] = array(
+      '#title' => t('Description Position'),
+      '#type' => 'select',
+      '#options' => array(
+        'top' => t('Top'),
+        'bottom' => t('Bottom'),
+      ),
+      '#default_value' => $settings['description_position'],
+      '#states' => array(
+        'visible' => array(
+          ':input[name="fields[' . $field['field_name'] . '][settings_edit_form][settings][description]"]' => array('checked' => TRUE),
+        ),
+      ),
+    );
+  }
+  return $element;
+}
+
+/**
+ * Implements hook_field_formatter_settings_summary().
+ */
+function adyax_test_field_formatter_settings_summary($field, $instance, $view_mode) {
+  $display = $instance['display'][$view_mode];
+  $settings = $display['settings'];
+
+  $summary = array();
+
+  if ($display['type'] == 'adyax_test_embedvideo') {
+    $image_styles = image_style_options(FALSE);
+    if (isset($image_styles[$settings['image_style']])) {
+      $summary[] = t('Image style: @style', array('@style' => $image_styles[$settings['image_style']]));
+    }
+    else {
+      $summary[] = t('Original Image.');
+    }
+    if (isset($settings['image_link'])) {
+      $summary[] = t('Image link: @image_link', array('@image_link' => $settings['image_link']));
+    }
+    else {
+      $summary[] = t('Image link: none');
+    }
+  }
+  if (isset($settings['description']) && $settings['description']) {
+    $summary[] = t('Show description');
+  }
+  else {
+    $summary[] = t('Hide description');
+  }
+
+  return implode('<br />', $summary);
+}
+
+/**
+ * Implements hook_field_formatter_view().
+ */
+function adyax_test_field_formatter_view($entity_type, $entity, $field, $instance, $langcode, $items, $display) {
+  $element = array();
+  $settings = $display['settings'];
+
+  if ($display['type'] == 'adyax_test_embedvideo' && $display['settings']['image_link'] == 'content') {
+    $path = entity_uri($entity_type, $entity);
+  }
+
+  foreach ($items as $delta => $item) {
+    if (isset($item['description']) && $item['description'] && $settings['description']) {
+      $description = array(
+        '#prefix' => '<div class="video-embed-description">',
+        '#markup' => check_plain($item['description']),
+        '#suffix' => '</div>',
+      );
+      $alt = $item['description'];
+    }
+    else {
+      $description = array();
+      $alt = '';
+    }
+
+    if ($display['type'] == 'adyax_test_embedvideo') {
+      if (isset($item['thumbnail_path'])) {
+        if ($display['settings']['image_link'] == 'source') {
+          if ($ret = parse_url($item['video_url'])) {
+            if (!isset($ret["scheme"])) {
+              $item['video_url'] = "http://{$item['video_url']}";
+            }
+          }
+          $path = array(
+            'path' => $item['video_url'],
+            'options' => array(),
+          );
+        }
+
+        $element[$delta] = array(
+          '#theme' => 'image_formatter',
+          '#item' => array('uri' => $item['thumbnail_path'], 'alt' => $alt),
+          '#image_style' => $display['settings']['image_style'],
+          '#path' => isset($path) ? $path : '',
+        );
+      }
+      else {
+        $element[$delta] = array();
+      }
+    }
+
+    $description_html = drupal_render($description);
+
+    $pos = isset($settings['description_position']) ? $settings['description_position'] : 'bottom';
+    if ($pos == 'top') {
+      $element[$delta]['#prefix'] = isset($element[$delta]['#prefix']) ? $element[$delta]['#prefix'] : '';
+      $element[$delta]['#prefix'] = $description_html . $element[$delta]['#prefix'];
+    }
+    else {
+      $element[$delta]['#suffix'] = isset($element[$delta]['#suffix']) ? $element[$delta]['#suffix'] : '';
+      $element[$delta]['#suffix'] .= $description_html;
+    }
+  }
+
+  return $element;
+}
+
+/**
+ * Implements hook_ctools_plugin_directory().
+ */
+function adyax_test_ctools_plugin_directory($owner, $plugin_type) {
+  if ($owner == 'ctools' && $plugin_type == 'content_types') {
+    return 'plugins/content_types';
+  }
+}

@@ -1,0 +1,8 @@
+name = Adyax test: Set Vimeo video
+description = Adds link from Vimeo video page.
+package = Custom modules
+core = 7.x
+files[] = adyax_test.module
+dependencies[] = field
+dependencies[] = ctools
+dependencies[] = image

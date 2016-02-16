@@ -1,0 +1,34 @@
+<?php
+/**
+ * @file
+ * Install functions for the adyax_test module.
+ */
+
+/**
+ * Implements hook_field_schema().
+ */
+function adyax_test_field_schema($field) {
+  $columns = array(
+    'video_url' => array(
+      'type' => 'varchar',
+      'length' => 512,
+      'default' => '',
+    ),
+    'thumbnail_path' => array(
+      'type' => 'varchar',
+      'length' => 512,
+      'default' => '',
+    ),
+    'description' => array(
+      'type' => 'text',
+      'not null' => FALSE,
+    ),
+  );
+
+  $indexes = array();
+
+  return array(
+    'columns' => $columns,
+    'indexes' => $indexes,
+  );
+}
